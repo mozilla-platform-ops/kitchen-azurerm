@@ -278,6 +278,92 @@ describe Kitchen::Driver::Azurerm do
     # end
   end
 
+  describe "#spot_deployment_parameters" do
+    subject { driver.send(:spot_deployment_parameters) }
+
+    context "when spot and ephemeral OS disk are both enabled with Deallocate policy" do
+      let(:config) do
+        {
+          subscription_id: subscription_id,
+          location: location,
+          machine_size: machine_size,
+          vm_tags: vm_tags,
+          image_urn: image_urn,
+          vm_name: vm_name,
+          spot_instance: true,
+          spot_eviction_policy: "Deallocate",
+          spot_max_price: -1,
+          use_ephemeral_osdisk: true,
+        }
+      end
+
+      it "overrides eviction policy to Delete" do
+        expect(subject[:spotEvictionPolicy]).to eq("Delete")
+      end
+
+      it "emits a warning about the override" do
+        expect(driver).to receive(:warn).with(/Overriding 'Deallocate' to 'Delete'/)
+        subject
+      end
+
+      it "returns spotMaxPrice as a string" do
+        expect(subject[:spotMaxPrice]).to eq("-1")
+      end
+    end
+
+    context "when spot is enabled without ephemeral OS disk" do
+      let(:config) do
+        {
+          subscription_id: subscription_id,
+          location: location,
+          machine_size: machine_size,
+          vm_tags: vm_tags,
+          image_urn: image_urn,
+          vm_name: vm_name,
+          spot_instance: true,
+          spot_eviction_policy: "Deallocate",
+          spot_max_price: -1,
+          use_ephemeral_osdisk: false,
+        }
+      end
+
+      it "preserves the Deallocate eviction policy" do
+        expect(subject[:spotEvictionPolicy]).to eq("Deallocate")
+      end
+
+      it "does not emit a warning" do
+        expect(driver).not_to receive(:warn)
+        subject
+      end
+    end
+
+    context "when spot and ephemeral OS disk are enabled with Delete policy" do
+      let(:config) do
+        {
+          subscription_id: subscription_id,
+          location: location,
+          machine_size: machine_size,
+          vm_tags: vm_tags,
+          image_urn: image_urn,
+          vm_name: vm_name,
+          spot_instance: true,
+          spot_eviction_policy: "Delete",
+          spot_max_price: -1,
+          use_ephemeral_osdisk: true,
+        }
+      end
+
+      it "keeps Delete eviction policy unchanged" do
+        expect(subject[:spotEvictionPolicy]).to eq("Delete")
+      end
+
+      it "does not emit a warning" do
+        expect(driver).not_to receive(:warn)
+        subject
+      end
+    end
+  end
+
   describe "#parameters_in_values_format" do
     subject { driver.send(:parameters_in_values_format, params) }
 
@@ -433,6 +519,32 @@ describe Kitchen::Driver::Azurerm do
 
       it "includes billing profile in deployment template" do
         expect(vm_resource["properties"]).to have_key("billingProfile")
+      end
+    end
+
+    context "when spot_instance and ephemeral OS disk are both enabled" do
+      let(:config) do
+        {
+          subscription_id: subscription_id,
+          location: location,
+          machine_size: machine_size,
+          vm_tags: vm_tags,
+          image_urn: image_urn,
+          vm_name: vm_name,
+          spot_instance: true,
+          spot_eviction_policy: "Deallocate",
+          spot_max_price: -1,
+          use_ephemeral_osdisk: true,
+        }
+      end
+
+      it "uses ephemeral OS disk in deployment template" do
+        os_disk = vm_resource["properties"]["storageProfile"]["osDisk"]
+        expect(os_disk["diffDiskSettings"]["option"]).to eq("Local")
+      end
+
+      it "includes spot priority in deployment template" do
+        expect(vm_resource["properties"]["priority"]).to eq("Spot")
       end
     end
 
