@@ -225,6 +225,18 @@ module Kitchen
         false
       end
 
+      default_config(:spot_instance) do |_config|
+        false
+      end
+
+      default_config(:spot_eviction_policy) do |_config|
+        "Deallocate"
+      end
+
+      default_config(:spot_max_price) do |_config|
+        -1
+      end
+
       def create(state)
         state = validate_state(state)
         deployment_parameters = {
@@ -241,6 +253,9 @@ module Kitchen
           secretUrl: config[:secret_url],
           vaultName: config[:vault_name],
           vaultResourceGroup: config[:vault_resource_group],
+          spotInstance: config[:spot_instance],
+          spotEvictionPolicy: config[:spot_eviction_policy],
+          spotMaxPrice: config[:spot_max_price],
         }
 
         if instance.transport[:ssh_key].nil?
@@ -746,10 +761,10 @@ module Kitchen
 
       def virtual_machine_deployment_template
         if config[:vnet_id] == ""
-          virtual_machine_deployment_template_file("public.erb", vm_tags: vm_tag_string(config[:vm_tags]), use_managed_disks: config[:use_managed_disks], image_url: config[:image_url], storage_account_type: config[:storage_account_type], existing_storage_account_blob_url: config[:existing_storage_account_blob_url], image_id: config[:image_id], existing_storage_account_container: config[:existing_storage_account_container], custom_data: config[:custom_data], os_disk_size_gb: config[:os_disk_size_gb], data_disks_for_vm_json:, use_ephemeral_osdisk: config[:use_ephemeral_osdisk], ssh_key: instance.transport[:ssh_key], plan_json:)
+          virtual_machine_deployment_template_file("public.erb", vm_tags: vm_tag_string(config[:vm_tags]), use_managed_disks: config[:use_managed_disks], image_url: config[:image_url], storage_account_type: config[:storage_account_type], existing_storage_account_blob_url: config[:existing_storage_account_blob_url], image_id: config[:image_id], existing_storage_account_container: config[:existing_storage_account_container], custom_data: config[:custom_data], os_disk_size_gb: config[:os_disk_size_gb], data_disks_for_vm_json:, use_ephemeral_osdisk: config[:use_ephemeral_osdisk], ssh_key: instance.transport[:ssh_key], plan_json:, spot_instance: config[:spot_instance])
         else
           info "Using custom vnet: #{config[:vnet_id]}"
-          virtual_machine_deployment_template_file("internal.erb", vnet_id: config[:vnet_id], subnet_id: config[:subnet_id], public_ip: config[:public_ip], vm_tags: vm_tag_string(config[:vm_tags]), use_managed_disks: config[:use_managed_disks], image_url: config[:image_url], storage_account_type: config[:storage_account_type], existing_storage_account_blob_url: config[:existing_storage_account_blob_url], image_id: config[:image_id], existing_storage_account_container: config[:existing_storage_account_container], custom_data: config[:custom_data], os_disk_size_gb: config[:os_disk_size_gb], data_disks_for_vm_json:, use_ephemeral_osdisk: config[:use_ephemeral_osdisk], ssh_key: instance.transport[:ssh_key], public_ip_sku: config[:public_ip_sku], plan_json:)
+          virtual_machine_deployment_template_file("internal.erb", vnet_id: config[:vnet_id], subnet_id: config[:subnet_id], public_ip: config[:public_ip], vm_tags: vm_tag_string(config[:vm_tags]), use_managed_disks: config[:use_managed_disks], image_url: config[:image_url], storage_account_type: config[:storage_account_type], existing_storage_account_blob_url: config[:existing_storage_account_blob_url], image_id: config[:image_id], existing_storage_account_container: config[:existing_storage_account_container], custom_data: config[:custom_data], os_disk_size_gb: config[:os_disk_size_gb], data_disks_for_vm_json:, use_ephemeral_osdisk: config[:use_ephemeral_osdisk], ssh_key: instance.transport[:ssh_key], public_ip_sku: config[:public_ip_sku], plan_json:, spot_instance: config[:spot_instance])
         end
       end
 

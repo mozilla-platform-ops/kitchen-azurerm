@@ -114,6 +114,18 @@ describe Kitchen::Driver::Azurerm do
     it "Should use tk- vm prefix" do
       expect(default_config[:vm_prefix]).to eq("tk-")
     end
+
+    it "Should have spot_instance disabled by default" do
+      expect(default_config[:spot_instance]).to eq(false)
+    end
+
+    it "Should use Deallocate as default spot eviction policy" do
+      expect(default_config[:spot_eviction_policy]).to eq("Deallocate")
+    end
+
+    it "Should use -1 as default spot max price" do
+      expect(default_config[:spot_max_price]).to eq(-1)
+    end
   end
 
   describe "#validate_state" do
@@ -322,6 +334,64 @@ describe Kitchen::Driver::Azurerm do
 
       it "does not include plan information in deployment template" do
         expect(vm_resource).not_to have_key("plan")
+      end
+    end
+
+    context "when spot_instance is enabled" do
+      let(:config) do
+        {
+          subscription_id: subscription_id,
+          location: location,
+          machine_size: machine_size,
+          vm_tags: vm_tags,
+          image_urn: image_urn,
+          vm_name: vm_name,
+          spot_instance: true,
+          spot_eviction_policy: "Deallocate",
+          spot_max_price: -1,
+        }
+      end
+
+      it "includes spot priority in deployment template" do
+        expect(vm_resource["properties"]["priority"]).to eq("Spot")
+      end
+
+      it "includes eviction policy parameter in deployment template" do
+        expect(vm_resource["properties"]["evictionPolicy"]).to be_a(String)
+      end
+
+      it "includes billing profile in deployment template" do
+        expect(vm_resource["properties"]).to have_key("billingProfile")
+      end
+
+      it "includes spot parameters in template" do
+        expect(parsed_json["parameters"]).to have_key("spotEvictionPolicy")
+        expect(parsed_json["parameters"]).to have_key("spotMaxPrice")
+      end
+    end
+
+    context "when spot_instance is not enabled" do
+      let(:config) do
+        {
+          subscription_id: subscription_id,
+          location: location,
+          machine_size: machine_size,
+          vm_tags: vm_tags,
+          image_urn: image_urn,
+          vm_name: vm_name,
+        }
+      end
+
+      it "does not include spot priority in deployment template" do
+        expect(vm_resource["properties"]).not_to have_key("priority")
+      end
+
+      it "does not include eviction policy in deployment template" do
+        expect(vm_resource["properties"]).not_to have_key("evictionPolicy")
+      end
+
+      it "does not include billing profile in deployment template" do
+        expect(vm_resource["properties"]).not_to have_key("billingProfile")
       end
     end
   end

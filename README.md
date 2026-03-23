@@ -594,6 +594,43 @@ suites:
     attributes:
 ```
 
+### kitchen.yml example 13 - deploy VM as Azure Spot Instance
+
+The following example introduces the ```spot_instance```, ```spot_eviction_policy```, and ```spot_max_price``` properties under "driver" in the configuration file. You can use this capability to provision [Azure Spot VMs](https://learn.microsoft.com/en-us/azure/virtual-machines/spot-vms) at reduced cost, with the trade-off that Azure may evict the VM when it needs the capacity back.
+
+| Property | Default | Description |
+|---|---|---|
+| `spot_instance` | `false` | Set to `true` to provision a Spot VM. |
+| `spot_eviction_policy` | `Deallocate` | What happens when the VM is evicted: `Deallocate` (stop and retain the disk) or `Delete` (remove the VM and disk). |
+| `spot_max_price` | `-1` | The maximum hourly price you are willing to pay. `-1` means the current on-demand price is used as the cap. |
+
+```yaml
+---
+driver:
+  name: azurerm
+  subscription_id: 'your-azure-subscription-id-here'
+  location: 'West Europe'
+  machine_size: 'Standard_D2s_v3'
+  spot_instance: true
+  spot_eviction_policy: Deallocate
+  spot_max_price: -1
+
+transport:
+  ssh_key: ~/.ssh/id_kitchen-azurerm
+
+provisioner:
+  name: chef_zero
+
+platforms:
+  - name: ubuntu-2004
+    driver:
+      image_urn: Canonical:0001-com-ubuntu-server-focal:20_04-lts:latest
+
+suites:
+  - name: default
+    attributes:
+```
+
 ## Support for Government and Sovereign Clouds (China and Germany)
 
 Starting with v0.9.0 this driver has support for Azure Government and Sovereign Clouds via the use of the ```azure_environment``` setting. Valid Azure environments are ```Azure```, ```AzureUSGovernment```, ```AzureChina``` and ```AzureGermanCloud```
