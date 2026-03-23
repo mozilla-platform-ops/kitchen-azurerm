@@ -253,10 +253,12 @@ module Kitchen
           secretUrl: config[:secret_url],
           vaultName: config[:vault_name],
           vaultResourceGroup: config[:vault_resource_group],
-          spotInstance: config[:spot_instance],
-          spotEvictionPolicy: config[:spot_eviction_policy],
-          spotMaxPrice: config[:spot_max_price],
         }
+
+        if config[:spot_instance]
+          deployment_parameters[:spotEvictionPolicy] = config[:spot_eviction_policy]
+          deployment_parameters[:spotMaxPrice] = config[:spot_max_price]
+        end
 
         if instance.transport[:ssh_key].nil?
           deployment_parameters[:adminPassword] = config[:password]
