@@ -257,7 +257,7 @@ module Kitchen
 
         if config[:spot_instance]
           deployment_parameters[:spotEvictionPolicy] = config[:spot_eviction_policy]
-          deployment_parameters[:spotMaxPrice] = config[:spot_max_price]
+          deployment_parameters[:spotMaxPrice] = config[:spot_max_price].to_s
         end
 
         if instance.transport[:ssh_key].nil?
