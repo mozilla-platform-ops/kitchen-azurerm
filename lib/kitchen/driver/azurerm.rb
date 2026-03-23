@@ -256,8 +256,8 @@ module Kitchen
         }
 
         if config[:spot_instance]
-          deployment_parameters[:spotEvictionPolicy] = config[:spot_eviction_policy]
-          deployment_parameters[:spotMaxPrice] = config[:spot_max_price].to_s
+          spot_params = spot_deployment_parameters
+          deployment_parameters.merge!(spot_params)
         end
 
         if instance.transport[:ssh_key].nil?
@@ -538,6 +538,17 @@ module Kitchen
           tag_string = tag_array.join
         end
         tag_string
+      end
+
+      def spot_deployment_parameters
+        if config[:use_ephemeral_osdisk] && config[:spot_eviction_policy] != "Delete"
+          warn("Spot VMs with ephemeral OS disks require eviction policy 'Delete'. Overriding '#{config[:spot_eviction_policy]}' to 'Delete'.")
+          config[:spot_eviction_policy] = "Delete"
+        end
+        {
+          spotEvictionPolicy: config[:spot_eviction_policy],
+          spotMaxPrice: config[:spot_max_price].to_s,
+        }
       end
 
       def parameters_in_values_format(parameters_in)
