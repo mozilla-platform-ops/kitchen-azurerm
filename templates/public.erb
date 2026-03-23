@@ -205,6 +205,20 @@
                 "description": "Whether to enable (true) or disable (false) boot diagnostics. Default: false."
             }
         }
+        <%- if spot_instance -%>
+        ,"spotEvictionPolicy": {
+            "type": "string",
+            "metadata": {
+                "description": "The eviction policy for the Spot VM. Deallocate or Delete."
+            }
+        },
+        "spotMaxPrice": {
+            "type": "string",
+            "metadata": {
+                "description": "The maximum price you are willing to pay for a Spot VM. -1 means market price."
+            }
+        }
+        <%- end -%>
     },
     "variables": {
         "location": "[parameters('location')]",
@@ -341,6 +355,13 @@
                 "hardwareProfile": {
                     "vmSize": "[variables('vmSize')]"
                 },
+                <%- if spot_instance -%>
+                "priority": "Spot",
+                "evictionPolicy": "[parameters('spotEvictionPolicy')]",
+                "billingProfile": {
+                    "maxPrice": "[float(parameters('spotMaxPrice'))]"
+                },
+                <%- end -%>
                 "osProfile": {
                     "computername": "[variables('vmName')]",
                     <%- unless custom_data.empty? -%>
