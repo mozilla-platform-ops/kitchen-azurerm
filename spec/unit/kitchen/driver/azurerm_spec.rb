@@ -278,6 +278,34 @@ describe Kitchen::Driver::Azurerm do
     # end
   end
 
+  describe "#parameters_in_values_format" do
+    subject { driver.send(:parameters_in_values_format, params) }
+
+    context "when spot_max_price is converted to string" do
+      let(:params) do
+        { spotMaxPrice: (-1).to_s, spotEvictionPolicy: "Deallocate" }
+      end
+
+      it "wraps spotMaxPrice as a string value" do
+        expect(subject[:spotMaxPrice]).to eq({ "value" => "-1" })
+      end
+
+      it "wraps spotEvictionPolicy as a string value" do
+        expect(subject[:spotEvictionPolicy]).to eq({ "value" => "Deallocate" })
+      end
+    end
+
+    context "when spot_max_price is a float converted to string" do
+      let(:params) do
+        { spotMaxPrice: (0.05).to_s }
+      end
+
+      it "wraps the float value as a string" do
+        expect(subject[:spotMaxPrice]).to eq({ "value" => "0.05" })
+      end
+    end
+  end
+
   describe "#virtual_machine_deployment_template" do
     subject { driver.send(:virtual_machine_deployment_template) }
 
@@ -352,6 +380,11 @@ describe Kitchen::Driver::Azurerm do
         }
       end
 
+      it "uses a Compute API version that supports spot VMs" do
+        api_version = vm_resource["apiVersion"]
+        expect(api_version).to be >= "2019-03-01"
+      end
+
       it "includes spot priority in deployment template" do
         expect(vm_resource["properties"]["priority"]).to eq("Spot")
       end
@@ -367,6 +400,39 @@ describe Kitchen::Driver::Azurerm do
       it "includes spot parameters in template" do
         expect(parsed_json["parameters"]).to have_key("spotEvictionPolicy")
         expect(parsed_json["parameters"]).to have_key("spotMaxPrice")
+      end
+
+      it "declares spotMaxPrice as a string parameter" do
+        expect(parsed_json["parameters"]["spotMaxPrice"]["type"]).to eq("string")
+      end
+
+      it "converts spotMaxPrice to float in billingProfile" do
+        max_price = vm_resource["properties"]["billingProfile"]["maxPrice"]
+        expect(max_price).to eq("[float(parameters('spotMaxPrice'))]")
+      end
+    end
+
+    context "when spot_instance is enabled with Delete eviction policy" do
+      let(:config) do
+        {
+          subscription_id: subscription_id,
+          location: location,
+          machine_size: machine_size,
+          vm_tags: vm_tags,
+          image_urn: image_urn,
+          vm_name: vm_name,
+          spot_instance: true,
+          spot_eviction_policy: "Delete",
+          spot_max_price: 0.05,
+        }
+      end
+
+      it "includes spot priority in deployment template" do
+        expect(vm_resource["properties"]["priority"]).to eq("Spot")
+      end
+
+      it "includes billing profile in deployment template" do
+        expect(vm_resource["properties"]).to have_key("billingProfile")
       end
     end
 
@@ -392,6 +458,11 @@ describe Kitchen::Driver::Azurerm do
 
       it "does not include billing profile in deployment template" do
         expect(vm_resource["properties"]).not_to have_key("billingProfile")
+      end
+
+      it "does not include spot parameters in template" do
+        expect(parsed_json["parameters"]).not_to have_key("spotEvictionPolicy")
+        expect(parsed_json["parameters"]).not_to have_key("spotMaxPrice")
       end
     end
   end
