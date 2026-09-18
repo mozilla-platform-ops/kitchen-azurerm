@@ -262,6 +262,9 @@ Set one of `image_urn` or `image_id`.
 | `custom_data` | `""` | Custom data passed to the VM, as a string or a path to a file. |
 | `use_fqdn_hostname` | `false` | Connect using the FQDN rather than the IP address. |
 | `store_deployment_credentials_in_state` | `true` | Persist the generated credentials in the Test Kitchen state file. |
+| `spot_instance` | `false` | Use a Spot VM. |
+| `spot_eviction_policy` | `Deallocate` | Use `Deallocate` to stop the VM or `Delete` to remove it after eviction. |
+| `spot_max_price` | `-1` | Maximum hourly price in USD. `-1` sets the cap to the on-demand price. |
 
 ### Disks
 
@@ -703,6 +706,22 @@ platforms:
 suites:
   - name: default
 ```
+
+### Azure Spot VMs
+
+Set `spot_instance: true` to use a Spot VM. Azure can evict the VM when it
+needs capacity.
+
+```yaml
+driver:
+  name: azurerm
+  spot_instance: true
+  spot_eviction_policy: Delete
+  spot_max_price: -1
+```
+
+With `use_ephemeral_osdisk: true`, the driver sets the eviction policy to
+`Delete` and reports the change.
 
 ## Finding an image URN
 

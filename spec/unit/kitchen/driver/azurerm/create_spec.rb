@@ -14,6 +14,80 @@ RSpec.describe Kitchen::Driver::Azurerm, "#create" do
     record_deployments(arm_client)
   end
 
+  describe "Spot compatibility" do
+    %w{public internal}.each do |network|
+      context "with the #{network} template" do
+        let(:config) do
+          network == "internal" ? { vnet_id: "/vnet", subnet_id: "default" } : {}
+        end
+        let(:transport) { transport_double(name: "Winrm") }
+        let(:deployment) { submitted_deployments.first[:deployment]["properties"] }
+        let(:template) { deployment["template"] }
+        let(:properties) { vm_resource(template)["properties"] }
+
+        it "omits Spot properties and parameters by default" do
+          driver.create(state)
+          expect(properties).not_to include("priority", "evictionPolicy", "billingProfile")
+          expect(template["parameters"]).not_to include("spotEvictionPolicy", "spotMaxPrice")
+          expect(deployment_parameters).not_to include("spotEvictionPolicy", "spotMaxPrice")
+        end
+
+        context "with Spot enabled" do
+          let(:config) { super().merge(spot_instance: true) }
+
+          it "submits Spot properties and the existing defaults" do
+            driver.create(state)
+            expect(properties).to include(
+              "priority" => "Spot",
+              "evictionPolicy" => "[parameters('spotEvictionPolicy')]",
+              "billingProfile" => { "maxPrice" => "[float(parameters('spotMaxPrice'))]" }
+            )
+            expect(template["parameters"]["spotMaxPrice"]["type"]).to eq("string")
+            expect(deployment_parameters).to include(
+              "spotEvictionPolicy" => { "value" => "Deallocate" },
+              "spotMaxPrice" => { "value" => "-1" }
+            )
+            expect(deployment_parameters.keys - template["parameters"].keys).to be_empty
+          end
+
+          context "with a custom price and Delete policy" do
+            let(:config) { super().merge(spot_max_price: 0.05, spot_eviction_policy: "Delete") }
+
+            it "preserves the policy and sends the price as a string" do
+              expect(driver).not_to receive(:warn)
+              driver.create(state)
+              expect(deployment_parameters).to include(
+                "spotEvictionPolicy" => { "value" => "Delete" },
+                "spotMaxPrice" => { "value" => "0.05" }
+              )
+            end
+          end
+
+          context "with an ephemeral OS disk" do
+            let(:config) { super().merge(use_ephemeral_osdisk: true) }
+
+            it "changes Deallocate to Delete and keeps the ephemeral disk" do
+              expect(driver).to receive(:warn).with(/Overriding 'Deallocate' to 'Delete'/)
+              driver.create(state)
+              expect(deployment_parameters["spotEvictionPolicy"]).to eq("value" => "Delete")
+              expect(properties["storageProfile"]["osDisk"]["diffDiskSettings"]).to include("option" => "Local")
+            end
+
+            context "with Delete already set" do
+              let(:config) { super().merge(spot_eviction_policy: "Delete") }
+
+              it "keeps Delete without a warning" do
+                expect(driver).not_to receive(:warn)
+                driver.create(state)
+                expect(deployment_parameters["spotEvictionPolicy"]).to eq("value" => "Delete")
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
   describe "preconditions" do
     it "refuses to run without a subscription_id" do
       driver = build_driver(subscription_id: nil)

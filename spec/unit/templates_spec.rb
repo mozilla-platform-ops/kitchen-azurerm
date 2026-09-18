@@ -9,6 +9,8 @@ RSpec.describe "ARM deployment templates" do
   # independently against the default configuration.
   TEMPLATE_VARIATIONS = {
     "defaults" => {},
+    "spot instance" => { spot_instance: true },
+    "spot with ephemeral os disk" => { spot_instance: true, use_ephemeral_osdisk: true },
     "ephemeral os disk" => { use_ephemeral_osdisk: true },
     "sized os disk" => { os_disk_size_gb: 128 },
     "premium os disk" => { storage_account_type: "Premium_LRS" },

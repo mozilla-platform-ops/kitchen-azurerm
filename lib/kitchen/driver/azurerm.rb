@@ -245,6 +245,18 @@ module Kitchen
         false
       end
 
+      default_config(:spot_instance) do |_config|
+        false
+      end
+
+      default_config(:spot_eviction_policy) do |_config|
+        "Deallocate"
+      end
+
+      default_config(:spot_max_price) do |_config|
+        -1
+      end
+
       # Resource id of an existing network security group to attach to the NIC.
       # When empty, and a public IP is being created, one is generated with rules
       # for the transport in use.
@@ -411,6 +423,7 @@ module Kitchen
         parameters["osDiskSizeGb"] = os_disk_size_gb unless config[:os_disk_size_gb].to_s.empty?
         parameters["nsgId"] = config[:nsg_id] unless config[:nsg_id].to_s.empty?
 
+        parameters.merge!(spot_deployment_parameters) if config[:spot_instance]
         parameters.merge(image_parameters)
       end
 
@@ -853,6 +866,20 @@ module Kitchen
         vm_tags_in.map { |key, value| "#{key.to_s.to_json}: #{value.to_s.to_json}" }.join(",\n")
       end
 
+      # Builds Spot parameters and applies the eviction policy for ephemeral disks.
+      #
+      # @return [Hash] ARM parameter names and values.
+      def spot_deployment_parameters
+        if config[:use_ephemeral_osdisk] && config[:spot_eviction_policy] != "Delete"
+          warn("Spot VMs with ephemeral OS disks require eviction policy 'Delete'. Overriding '#{config[:spot_eviction_policy]}' to 'Delete'.")
+          config[:spot_eviction_policy] = "Delete"
+        end
+        {
+          spotEvictionPolicy: config[:spot_eviction_policy],
+          spotMaxPrice: config[:spot_max_price].to_s,
+        }
+      end
+
       # Converts a flat parameter Hash into the ARM +{name: {"value" => v}}+ shape.
       #
       # @param parameters_in [Hash] parameter name to value.
@@ -1245,6 +1272,7 @@ module Kitchen
           os_disk_size_gb: config[:os_disk_size_gb],
           data_disks_for_vm_json:,
           use_ephemeral_osdisk: config[:use_ephemeral_osdisk],
+          spot_instance: config[:spot_instance],
           ssh_key: instance.transport[:ssh_key],
           plan_json:,
           secret_url: config[:secret_url],
