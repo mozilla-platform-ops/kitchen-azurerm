@@ -119,6 +119,11 @@ RSpec.describe Kitchen::Driver::Azure::Http do
       described_class.request(method: :get, url: plain)
     end
 
+    it "keeps response headers with lower-cased names" do
+      stub_request(:get, url).to_return(status: 429, headers: { "Retry-After" => "5" })
+      expect(described_class.request(method: :get, url:).header("retry-after")).to eq("5")
+    end
+
     it "does not treat an HTTP error status as transient" do
       stub_request(:get, url).to_return(status: 500, body: "server error")
       expect(described_class.request(method: :get, url:).status).to eq(500)
@@ -140,6 +145,14 @@ RSpec.describe Kitchen::Driver::Azure::Http do
 
     it "is nil for an empty body" do
       expect(described_class.new(204, "").json).to be_nil
+    end
+
+    it "reads headers case-insensitively" do
+      expect(described_class.new(429, "", { "retry-after" => "5" }).header("Retry-After")).to eq("5")
+    end
+
+    it "is nil for a header when none were kept" do
+      expect(described_class.new(200, "").header("retry-after")).to be_nil
     end
 
     it "is nil rather than raising for a non-JSON body" do

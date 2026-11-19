@@ -1,4 +1,5 @@
 require "json" unless defined?(JSON)
+require "time" unless defined?(Time.httpdate)
 require "uri" unless defined?(URI)
 
 require_relative "errors"
@@ -37,14 +38,58 @@ module Kitchen
         # @return [String]
         SUBSCRIPTION_API_VERSION = "2022-12-01".freeze
 
+        # ARM throttles with 429 and tells the caller when to come back. The
+        # request was not processed, so it is safe to repeat for any method.
+        #
+        # @return [Array<Integer>]
+        THROTTLED_STATUSES = [429].freeze
+
+        # Server-side failures worth another try. These are retried only for
+        # requests that are safe to repeat after a partial success.
+        #
+        # @return [Array<Integer>]
+        SERVER_ERROR_STATUSES = [408, 500, 502, 503, 504].freeze
+
+        # Methods that can be repeated after a server-side failure.
+        #
+        # @return [Array<Symbol>]
+        IDEMPOTENT_METHODS = %i{get head delete}.freeze
+
+        # Retries after the first attempt.
+        #
+        # @return [Integer]
+        DEFAULT_MAX_RETRIES = 6
+
+        # First backoff delay, in seconds. Doubles on each retry.
+        #
+        # @return [Integer]
+        BASE_DELAY = 2
+
+        # Upper bound on one backoff delay, in seconds.
+        #
+        # @return [Integer]
+        MAX_DELAY = 60
+
+        # Upper bound on a server-supplied +Retry-After+, in seconds.
+        #
+        # @return [Integer]
+        MAX_RETRY_AFTER = 120
+
         # @param subscription_id [String]
         # @param environment [Environments::Environment]
         # @param token_provider [TokenProvider]
-        def initialize(subscription_id:, environment:, token_provider:)
+        # @param logger [#warn, nil] receives one line per retry.
+        # @param max_retries [Integer] retries for throttled or failed requests.
+        def initialize(subscription_id:, environment:, token_provider:, logger: nil, max_retries: DEFAULT_MAX_RETRIES)
           @subscription_id = subscription_id
           @environment = environment
           @token_provider = token_provider
+          @logger = logger
+          @max_retries = max_retries
         end
+
+        # @return [Integer]
+        attr_reader :max_retries
 
         # @return [String]
         attr_reader :subscription_id
@@ -210,6 +255,11 @@ module Kitchen
 
         # Performs an authenticated ARM request.
         #
+        # Throttled (429) requests are retried for every method. Server errors
+        # are retried only for idempotent methods. Each retry waits for the
+        # server's +Retry-After+ when given, otherwise for an exponential
+        # backoff with jitter.
+        #
         # @param method [Symbol]
         # @param path [String] path below the resource manager URL.
         # @param api_version [String]
@@ -219,21 +269,81 @@ module Kitchen
         # @raise [OperationError] when ARM returns an unexpected status.
         def call(method, path, api_version:, body: nil, allow: [])
           url = "#{environment.resource_manager_url.chomp("/")}#{path}?api-version=#{api_version}"
+          payload = body && JSON.generate(body)
+          attempt = 0
+
+          loop do
+            response = Http.request(method:, url:, headers: request_headers(body), body: payload)
+            return response if response.success? || allow.include?(response.status)
+
+            unless attempt < max_retries && retryable?(method, response.status)
+              raise OperationError.new(
+                "Azure returned HTTP #{response.status} for #{method.to_s.upcase} #{path}",
+                status: response.status,
+                body: error_body(response)
+              )
+            end
+
+            delay = retry_delay(response, attempt)
+            attempt += 1
+            @logger&.warn("Azure returned HTTP #{response.status} for #{method.to_s.upcase} #{path}; " \
+                          "retrying in #{delay.round(1)}s (retry #{attempt} of #{max_retries}).")
+            pause(delay)
+          end
+        end
+
+        # Headers for one request. Built per attempt so a refreshed token is
+        # picked up on retry.
+        #
+        # @param body [Hash, nil]
+        # @return [Hash{String => String}]
+        def request_headers(body)
           headers = {
             "Authorization" => token_provider.authorization_header,
             "Accept" => "application/json",
             "User-Agent" => "kitchen-azurerm/#{Kitchen::Driver::AZURERM_VERSION}",
           }
           headers["Content-Type"] = "application/json" if body
+          headers
+        end
 
-          response = Http.request(method:, url:, headers:, body: body && JSON.generate(body))
-          return response if response.success? || allow.include?(response.status)
+        # @param method [Symbol]
+        # @param status [Integer]
+        # @return [Boolean] whether the failed request should be tried again.
+        def retryable?(method, status)
+          return true if THROTTLED_STATUSES.include?(status)
 
-          raise OperationError.new(
-            "Azure returned HTTP #{response.status} for #{method.to_s.upcase} #{path}",
-            status: response.status,
-            body: error_body(response)
-          )
+          SERVER_ERROR_STATUSES.include?(status) && IDEMPOTENT_METHODS.include?(method)
+        end
+
+        # Seconds to wait before the next attempt.
+        #
+        # @param response [Http::Response]
+        # @param attempt [Integer] zero-based count of retries so far.
+        # @return [Float]
+        def retry_delay(response, attempt)
+          retry_after = parse_retry_after(response.header("retry-after"))
+          return retry_after.clamp(1, MAX_RETRY_AFTER).to_f if retry_after
+
+          ceiling = [BASE_DELAY * (2**attempt), MAX_DELAY].min.to_f
+          (ceiling / 2) + (rand * ceiling / 2)
+        end
+
+        # @param value [String, nil] seconds or an HTTP date.
+        # @return [Numeric, nil]
+        def parse_retry_after(value)
+          return nil if value.nil? || value.strip.empty?
+          return Integer(value.strip, 10) if value.strip.match?(/\A\d+\z/)
+
+          Time.httpdate(value.strip) - Time.now
+        rescue ArgumentError
+          nil
+        end
+
+        # @param seconds [Float]
+        # @return [void]
+        def pause(seconds)
+          sleep(seconds)
         end
 
         # @param response [Http::Response]

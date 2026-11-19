@@ -48,7 +48,9 @@ module Kitchen
         #   @return [Integer]
         # @!attribute [r] body
         #   @return [String]
-        Response = Struct.new(:status, :body) do
+        # @!attribute [r] headers
+        #   @return [Hash{String => String}, nil] lower-cased header names.
+        Response = Struct.new(:status, :body, :headers) do
           # @return [Boolean] whether the status is in the 2xx range.
           def success?
             status.between?(200, 299)
@@ -63,6 +65,14 @@ module Kitchen
             JSON.parse(body)
           rescue JSON::ParserError
             nil
+          end
+
+          # A response header, looked up case-insensitively.
+          #
+          # @param name [String]
+          # @return [String, nil]
+          def header(name)
+            headers&.[](name.to_s.downcase)
           end
         end
 
@@ -81,7 +91,7 @@ module Kitchen
           request.body = body if body
 
           response = perform(uri, request)
-          Response.new(response.code.to_i, response.body.to_s)
+          Response.new(response.code.to_i, response.body.to_s, response.each_header.to_h)
         rescue *TRANSIENT_ERRORS => e
           raise TransientError, "#{e.class}: #{e.message}"
         end
