@@ -69,7 +69,7 @@ module Kitchen
       #
       # @return [Azure::ArmClient]
       def arm_client
-        Azure::ArmClient.new(subscription_id:, environment: azure_environment, token_provider:)
+        Azure::ArmClient.new(subscription_id:, environment: azure_environment, token_provider:, logger:)
       end
 
       # Endpoints for the configured cloud.

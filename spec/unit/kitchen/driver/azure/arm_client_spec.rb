@@ -14,6 +14,9 @@ RSpec.describe Kitchen::Driver::Azure::ArmClient do
     instance_double(Kitchen::Driver::Azure::TokenProvider, authorization_header: "Bearer a-token")
   end
 
+  # Retries must never sleep for real in a unit test.
+  before { allow(client).to receive(:pause) }
+
   describe "request framing" do
     it "authenticates every request" do
       stub = stub_request(:get, "#{base}/resourcegroups/rg/providers/Microsoft.Resources/deployments/d")
@@ -203,6 +206,108 @@ RSpec.describe Kitchen::Driver::Azure::ArmClient do
     it "names the operation that failed" do
       stub_request(:delete, %r{/resourcegroups/rg}).to_return(status: 403, body: "{}")
       expect { client.delete_resource_group("rg") }.to raise_error(/HTTP 403 for DELETE/)
+    end
+  end
+
+  describe "throttling and server errors" do
+    let(:deployment_url) { %r{/deployments/d} }
+    let(:logger) { instance_double(Logger, warn: nil) }
+
+    subject(:client) do
+      described_class.new(subscription_id:, environment:, token_provider: token_provider_double, logger:)
+    end
+
+    it "retries a 429 and returns the later success" do
+      stub = stub_request(:get, deployment_url)
+        .to_return({ status: 429, body: "", headers: { "Retry-After" => "7" } }, { status: 200, body: '{"name":"d"}' })
+
+      expect(client.deployment("rg", "d")["name"]).to eq("d")
+      expect(stub).to have_been_requested.twice
+      expect(client).to have_received(:pause).with(7.0)
+    end
+
+    # ARM's own guidance: a throttled request was not processed, so even a
+    # PUT can be sent again.
+    it "retries a throttled PUT" do
+      stub = stub_request(:put, deployment_url)
+        .to_return({ status: 429, body: "" }, { status: 201, body: "{}" })
+
+      client.create_deployment("rg", "d", { "properties" => {} })
+      expect(stub).to have_been_requested.twice
+    end
+
+    it "honours an HTTP-date Retry-After" do
+      stub_request(:get, deployment_url)
+        .to_return({ status: 429, headers: { "Retry-After" => (Time.now + 30).httpdate } }, { status: 200, body: "{}" })
+
+      client.deployment("rg", "d")
+      expect(client).to have_received(:pause).with(be_within(2).of(30))
+    end
+
+    it "caps a very long Retry-After" do
+      stub_request(:get, deployment_url)
+        .to_return({ status: 429, headers: { "Retry-After" => "3600" } }, { status: 200, body: "{}" })
+
+      client.deployment("rg", "d")
+      expect(client).to have_received(:pause).with(described_class::MAX_RETRY_AFTER.to_f)
+    end
+
+    it "backs off exponentially with jitter when no Retry-After is given" do
+      stub_request(:get, deployment_url).to_return(status: 429, body: "")
+      delays = []
+      allow(client).to receive(:pause) { |seconds| delays << seconds }
+
+      expect { client.deployment("rg", "d") }.to raise_error(Kitchen::Driver::Azure::OperationError)
+      ceilings = [2, 4, 8, 16, 32, 60]
+      expect(delays.size).to eq(ceilings.size)
+      delays.zip(ceilings).each { |delay, ceiling| expect(delay).to be_between(ceiling / 2.0, ceiling) }
+    end
+
+    it "gives up after max_retries and raises the last status" do
+      stub = stub_request(:get, deployment_url).to_return(status: 429, body: "")
+
+      expect { client.deployment("rg", "d") }.to raise_error(/HTTP 429 for GET/)
+      expect(stub).to have_been_requested.times(described_class::DEFAULT_MAX_RETRIES + 1)
+    end
+
+    it "logs each retry" do
+      stub_request(:get, deployment_url).to_return({ status: 429 }, { status: 200, body: "{}" })
+
+      client.deployment("rg", "d")
+      expect(logger).to have_received(:warn).with(/HTTP 429 for GET .*retry 1 of 6/)
+    end
+
+    it "retries a 503 on a GET" do
+      stub = stub_request(:get, deployment_url).to_return({ status: 503 }, { status: 200, body: "{}" })
+
+      client.deployment("rg", "d")
+      expect(stub).to have_been_requested.twice
+    end
+
+    # A PUT that failed on the server side may still have been applied, so
+    # repeating it is left to the caller.
+    it "does not retry a 500 on a PUT" do
+      stub = stub_request(:put, deployment_url).to_return(status: 500, body: "{}")
+
+      expect { client.create_deployment("rg", "d", {}) }.to raise_error(/HTTP 500 for PUT/)
+      expect(stub).to have_been_requested.once
+    end
+
+    it "does not retry a client error" do
+      stub = stub_request(:get, deployment_url).to_return(status: 403, body: "{}")
+
+      expect { client.deployment("rg", "d") }.to raise_error(/HTTP 403/)
+      expect(stub).to have_been_requested.once
+    end
+
+    it "fetches the token again on each attempt" do
+      provider = token_provider_double
+      retrying = described_class.new(subscription_id:, environment:, token_provider: provider)
+      allow(retrying).to receive(:pause)
+      stub_request(:get, deployment_url).to_return({ status: 429 }, { status: 200, body: "{}" })
+
+      retrying.deployment("rg", "d")
+      expect(provider).to have_received(:authorization_header).twice
     end
   end
 
